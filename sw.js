@@ -1,0 +1,130 @@
+const CACHE = 'reminders-v1';
+const ASSETS = ['/', '/index.html', '/manifest.json'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys =>
+    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+  ));
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', e => {
+  e.respondWith(
+    caches.match(e.request).then(r => r || fetch(e.request))
+  );
+});
+
+// Receives scheduled alarm messages from the main app
+self.addEventListener('message', e => {
+  if (e.data?.type === 'SCHEDULE') {
+    scheduleAll(e.data.msgs, e.data.sched);
+  }
+  if (e.data?.type === 'CLEAR') {
+    clearAll();
+  }
+});
+
+let timers = [];
+
+function clearAll() {
+  timers.forEach(clearTimeout);
+  timers = [];
+}
+
+function randPick(msgs) {
+  return msgs[Math.floor(Math.random() * msgs.length)];
+}
+
+function fireNotif(msg) {
+  self.registration.showNotification(
+    msg.cat === 'mindset' ? '💭 Mindset' : '✅ Task',
+    {
+      body: msg.text,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      vibrate: [200, 100, 200],
+      data: { cat: msg.cat }
+    }
+  );
+}
+
+function scheduleAll(msgs, sched) {
+  clearAll();
+  if (!msgs.length || !sched) return;
+
+  if (sched.mode === 'fixed') {
+    scheduleFixed(msgs, sched.time);
+  } else if (sched.mode === 'random') {
+    scheduleRandom(msgs, sched.start, sched.end, sched.count);
+  } else {
+    scheduleInterval(msgs, sched.interval, sched.start, sched.end);
+  }
+}
+
+function scheduleFixed(msgs, timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const now = new Date();
+  const next = new Date();
+  next.setHours(h, m, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const delay = next - now;
+  const t = setTimeout(() => {
+    fireNotif(randPick(msgs));
+    scheduleFixed(msgs, timeStr);
+  }, delay);
+  timers.push(t);
+}
+
+function scheduleRandom(msgs, start, end, count) {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const now = new Date();
+  const startMs = new Date(); startMs.setHours(sh, sm, 0, 0);
+  const endMs = new Date(); endMs.setHours(eh, em, 0, 0);
+  const range = endMs - startMs;
+  const times = [];
+  for (let i = 0; i < count; i++) times.push(Math.floor(Math.random() * range));
+  times.sort((a, b) => a - b);
+  times.forEach(ms => {
+    const fire = new Date(startMs.getTime() + ms);
+    const delay = fire - now;
+    if (delay > 0) {
+      const t = setTimeout(() => fireNotif(randPick(msgs)), delay);
+      timers.push(t);
+    }
+  });
+  // Re-plan tomorrow
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(sh, sm, 0, 0);
+  const t = setTimeout(() => scheduleRandom(msgs, start, end, count), tomorrow - now);
+  timers.push(t);
+}
+
+function scheduleInterval(msgs, intervalMin, start, end) {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  function tick() {
+    const now = new Date();
+    const h = now.getHours(), m = now.getMinutes();
+    const inWindow = (h > sh || (h === sh && m >= sm)) && (h < eh || (h === eh && m < em));
+    if (inWindow) fireNotif(randPick(msgs));
+    const t = setTimeout(tick, intervalMin * 60000);
+    timers.push(t);
+  }
+  const now = new Date();
+  const first = new Date(); first.setHours(sh, sm, 0, 0);
+  const delay = first > now ? first - now : intervalMin * 60000;
+  const t = setTimeout(tick, delay);
+  timers.push(t);
+}
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(clients.openWindow('/'));
+});
