@@ -1,122 +1,303 @@
-const CACHE = 'reminders-v1';
-const ASSETS = ['/', '/index.html', '/manifest.json'];
-       
-self.addEventListener('install', e => {
-e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
-self.skipWaiting();
-});
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#4338CA">
+<link rel="manifest" href="/manifest.json">
+<title>Daily Reminders</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F5F5F7;min-height:100vh;padding-bottom:80px}
+  header{background:#4338CA;color:#fff;padding:16px 20px 12px;position:sticky;top:0;z-index:10}
+  header h1{font-size:20px;font-weight:600;letter-spacing:-0.3px}
+  header p{font-size:12px;opacity:0.75;margin-top:2px}
+  .tab-bar{display:flex;background:#fff;border-bottom:1px solid #E5E7EB;position:sticky;top:57px;z-index:9}
+  .tab{flex:1;padding:12px 0;font-size:13px;font-weight:500;border:none;background:transparent;cursor:pointer;color:#6B7280;border-bottom:2px solid transparent}
+  .tab.active{color:#4338CA;border-bottom-color:#4338CA}
+  .section{display:none;padding:16px}
+  .section.active{display:block}
+  .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+  .card h2{font-size:15px;font-weight:600;color:#111827;margin-bottom:12px}
+  .label{font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px}
+  .msg-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #F3F4F6}
+  .msg-item:last-child{border-bottom:none}
+  .pill{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;flex-shrink:0;margin-top:1px}
+  .pill-mindset{background:#EEF2FF;color:#4338CA}
+  .pill-task{background:#ECFDF5;color:#065F46}
+  .msg-text{font-size:14px;color:#374151;flex:1;line-height:1.4}
+  .del{background:none;border:none;font-size:18px;cursor:pointer;color:#D1D5DB;padding:0 2px;line-height:1;flex-shrink:0}
+  .del:hover{color:#EF4444}
+  select,input[type=time],textarea{width:100%;padding:10px 12px;border:1px solid #E5E7EB;border-radius:8px;font-size:14px;font-family:inherit;background:#fff;color:#111827;outline:none;margin-bottom:10px}
+  select:focus,input:focus,textarea:focus{border-color:#4338CA;box-shadow:0 0 0 3px rgba(67,56,202,0.1)}
+  textarea{resize:none;height:72px;margin-bottom:0}
+  .btn{display:block;width:100%;padding:12px;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;border:none;text-align:center}
+  .btn-primary{background:#4338CA;color:#fff}
+  .btn-primary:active{background:#3730A3}
+  .btn-secondary{background:#F3F4F6;color:#374151;margin-top:8px}
+  .btn-danger{background:#FEF2F2;color:#DC2626;margin-top:8px}
+  .mode-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:14px}
+  .mode-btn{padding:10px 4px;font-size:12px;font-weight:600;border:1.5px solid #E5E7EB;border-radius:8px;background:#fff;cursor:pointer;color:#6B7280;text-align:center}
+  .mode-btn.active{border-color:#4338CA;background:#EEF2FF;color:#4338CA}
+  .panel{display:none}
+  .panel.active{display:block}
+  .row{display:flex;gap:8px}
+  .row select,.row input{flex:1;margin-bottom:10px}
+  .status-card{display:flex;align-items:center;gap:12px;padding:14px}
+  .dot{width:10px;height:10px;border-radius:50%;background:#D1D5DB;flex-shrink:0}
+  .dot.on{background:#10B981}
+  .status-text{font-size:14px;color:#374151;font-weight:500}
+  .status-sub{font-size:12px;color:#9CA3AF;margin-top:2px}
+  .warn{background:#FFFBEB;border:1px solid #FCD34D;border-radius:10px;padding:12px;font-size:13px;color:#92400E;margin-bottom:12px;display:none}
+  .empty{text-align:center;padding:20px;font-size:13px;color:#9CA3AF}
+</style>
+</head>
+<body>
 
-self.addEventListener('activate', e => {
-e.waitUntil(caches.keys().then(keys =>
-Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-));
-self.clients.claim();
-});
+<header>
+  <h1>Daily Reminders</h1>
+  <p id="header-status">Not active</p>
+</header>
 
-self.addEventListener('fetch', e => {
-e.respondWith(
-caches.match(e.request).then(r => r || fetch(e.request))
-);
-});
+<div class="tab-bar">
+  <button class="tab active" onclick="showTab('messages')">Messages</button>
+  <button class="tab" onclick="showTab('schedule')">Schedule</button>
+  <button class="tab" onclick="showTab('status')">Status</button>
+</div>
 
-// Receives scheduled alarm messages from the main app
-self.addEventListener('message', e => {
-if (e.data?.type === 'SCHEDULE') {
-scheduleAll(e.data.msgs, e.data.sched);
+<div id="tab-messages" class="section active">
+  <div id="perm-warn" class="warn">⚠️ Notifications are blocked. Go to Status → Enable Notifications.</div>
+  <div class="card">
+    <h2>Your messages</h2>
+    <div id="msg-list"></div>
+  </div>
+  <div class="card">
+    <h2>Add a message</h2>
+    <div class="label">Category</div>
+    <select id="new-cat">
+      <option value="mindset">Mindset</option>
+      <option value="task">Task</option>
+    </select>
+    <div class="label">Message</div>
+    <textarea id="new-text" placeholder="Type your note or reminder..."></textarea>
+    <br><br>
+    <button class="btn btn-primary" onclick="addMsg()">Add message</button>
+  </div>
+</div>
+
+<div id="tab-schedule" class="section">
+  <div class="card">
+    <h2>Delivery mode</h2>
+    <div class="mode-grid">
+      <button class="mode-btn active" id="mode-fixed" onclick="setMode('fixed')">Set time</button>
+      <button class="mode-btn" id="mode-random" onclick="setMode('random')">Random</button>
+      <button class="mode-btn" id="mode-interval" onclick="setMode('interval')">Interval</button>
+    </div>
+
+    <div id="panel-fixed" class="panel active">
+      <div class="label">Send at</div>
+      <input type="time" id="fixed-time" value="09:00">
+      <div class="label">Repeat</div>
+      <select id="fixed-repeat">
+        <option value="daily">Every day</option>
+        <option value="weekdays">Weekdays only</option>
+        <option value="weekends">Weekends only</option>
+      </select>
+    </div>
+
+    <div id="panel-random" class="panel">
+      <div class="label">Window start</div>
+      <input type="time" id="rand-start" value="08:00">
+      <div class="label">Window end</div>
+      <input type="time" id="rand-end" value="21:00">
+      <div class="label">Reminders per day</div>
+      <select id="rand-count">
+        <option value="1">1 reminder</option>
+        <option value="2">2 reminders</option>
+        <option value="3">3 reminders</option>
+        <option value="5">5 reminders</option>
+      </select>
+    </div>
+
+    <div id="panel-interval" class="panel">
+      <div class="label">Every</div>
+      <select id="interval-val">
+        <option value="30">30 minutes</option>
+        <option value="60">1 hour</option>
+        <option value="90">1.5 hours</option>
+        <option value="120">2 hours</option>
+        <option value="180">3 hours</option>
+        <option value="240">4 hours</option>
+      </select>
+      <div class="label">Active window</div>
+      <div class="row">
+        <input type="time" id="int-start" value="08:00">
+        <input type="time" id="int-end" value="22:00">
+      </div>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="saveAndActivate()">Save &amp; activate</button>
+</div>
+
+<div id="tab-status" class="section">
+  <div class="card">
+    <div class="status-card">
+      <div class="dot" id="status-dot"></div>
+      <div>
+        <div class="status-text" id="status-text">Not active</div>
+        <div class="status-sub" id="status-sub">Configure a schedule to begin</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Notifications</h2>
+    <button class="btn btn-primary" onclick="requestPerms()">Enable notifications</button>
+    <button class="btn btn-secondary" onclick="sendTest()">Send test notification</button>
+  </div>
+  <div class="card">
+    <h2>Controls</h2>
+    <button class="btn btn-danger" onclick="deactivate()">Stop reminders</button>
+  </div>
+</div>
+
+<script>
+let msgs = JSON.parse(localStorage.getItem('rm_msgs') || '[]');
+let sched = JSON.parse(localStorage.getItem('rm_sched') || 'null');
+let mode = sched?.mode || 'fixed';
+let swReg = null;
+
+// Register service worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    swReg = reg;
+    if (sched && msgs.length) pushToSW();
+  });
 }
-if (e.data?.type === 'CLEAR') {
-clearAll();
-}
-});
 
-let timers = [];
-
-function clearAll() {
-timers.forEach(clearTimeout);
-timers = [];
+function showTab(t) {
+  document.querySelectorAll('.tab').forEach((el, i) => el.classList.toggle('active', ['messages','schedule','status'][i] === t));
+  ['messages','schedule','status'].forEach(name => {
+    document.getElementById('tab-' + name).classList.toggle('active', name === t);
+  });
 }
 
-function randPick(msgs) {
-return msgs[Math.floor(Math.random() * msgs.length)];
+function setMode(m) {
+  mode = m;
+  ['fixed','random','interval'].forEach(n => {
+    document.getElementById('mode-' + n).classList.toggle('active', n === m);
+    document.getElementById('panel-' + n).classList.toggle('active', n === m);
+  });
 }
 
-function fireNotif(msg) {
-self.registration.showNotification(
-msg.cat === 'mindset' ? '💭 Mindset' : '✅ Task',
-{
-body: msg.text,
-icon: '/icon-192.png',
-badge: '/icon-192.png',
-vibrate: [200, 100, 200],
-data: { cat: msg.cat }
-}
-);
+function renderMsgs() {
+  const el = document.getElementById('msg-list');
+  if (!msgs.length) { el.innerHTML = '<div class="empty">No messages yet. Add one below.</div>'; return; }
+  el.innerHTML = msgs.map((m, i) => `
+    <div class="msg-item">
+      <span class="pill pill-${m.cat}">${m.cat}</span>
+      <span class="msg-text">${m.text}</span>
+      <button class="del" onclick="delMsg(${i})">×</button>
+    </div>`).join('');
 }
 
-function scheduleAll(msgs, sched) {
-clearAll();
-if (!msgs.length || !sched) return;
-
-if (sched.mode === 'fixed') {
-scheduleFixed(msgs, sched.time);
-} else if (sched.mode === 'random') {
-scheduleRandom(msgs, sched.start, sched.end, sched.count);
-} else {
-scheduleInterval(msgs, sched.interval, sched.start, sched.end);
-}
+function addMsg() {
+  const t = document.getElementById('new-text').value.trim();
+  if (!t) return;
+  msgs.push({ cat: document.getElementById('new-cat').value, text: t });
+  save();
+  document.getElementById('new-text').value = '';
+  renderMsgs();
+  if (sched) pushToSW();
 }
 
-function scheduleFixed(msgs, timeStr) {
-const [h, m] = timeStr.split(':').map(Number);
-const now = new Date();
-const next = new Date();
-next.setHours(h, m, 0, 0);
-if (next <= now) next.setDate(next.getDate() + 1); const delay=next - now; const t=setTimeout(()=> {
-  fireNotif(randPick(msgs));
-  scheduleFixed(msgs, timeStr);
-  }, delay);
-  timers.push(t);
+function delMsg(i) {
+  msgs.splice(i, 1);
+  save();
+  renderMsgs();
+  if (sched) pushToSW();
+}
+
+function save() {
+  localStorage.setItem('rm_msgs', JSON.stringify(msgs));
+}
+
+function saveAndActivate() {
+  if (!msgs.length) { alert('Add at least one message first.'); return; }
+  const s = { mode };
+  if (mode === 'fixed') { s.time = document.getElementById('fixed-time').value; s.repeat = document.getElementById('fixed-repeat').value; }
+  else if (mode === 'random') { s.start = document.getElementById('rand-start').value; s.end = document.getElementById('rand-end').value; s.count = parseInt(document.getElementById('rand-count').value); }
+  else { s.interval = parseInt(document.getElementById('interval-val').value); s.start = document.getElementById('int-start').value; s.end = document.getElementById('int-end').value; }
+  sched = s;
+  localStorage.setItem('rm_sched', JSON.stringify(s));
+  pushToSW();
+  updateStatus();
+  showTab('status');
+}
+
+function pushToSW() {
+  if (!swReg?.active) return;
+  swReg.active.postMessage({ type: 'SCHEDULE', msgs, sched });
+}
+
+function deactivate() {
+  sched = null;
+  localStorage.removeItem('rm_sched');
+  if (swReg?.active) swReg.active.postMessage({ type: 'CLEAR' });
+  updateStatus();
+}
+
+function updateStatus() {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  const sub = document.getElementById('status-sub');
+  const hdr = document.getElementById('header-status');
+  if (sched) {
+    dot.classList.add('on');
+    txt.textContent = 'Active';
+    sub.textContent = descSched();
+    hdr.textContent = descSched();
+  } else {
+    dot.classList.remove('on');
+    txt.textContent = 'Not active';
+    sub.textContent = 'Configure a schedule to begin';
+    hdr.textContent = 'Not active';
   }
+}
 
-  function scheduleRandom(msgs, start, end, count) {
-  const [sh, sm] = start.split(':').map(Number);
-  const [eh, em] = end.split(':').map(Number);
-  const now = new Date();
-  const startMs = new Date(); startMs.setHours(sh, sm, 0, 0);
-  const endMs = new Date(); endMs.setHours(eh, em, 0, 0);
-  const range = endMs - startMs;
-  const times = [];
-  for (let i = 0; i < count; i++) times.push(Math.floor(Math.random() * range)); times.sort((a, b)=> a - b);
-    times.forEach(ms => {
-    const fire = new Date(startMs.getTime() + ms);
-    const delay = fire - now;
-    if (delay > 0) {
-    const t = setTimeout(() => fireNotif(randPick(msgs)), delay);
-    timers.push(t);
-    }
-    });
-    // Re-plan tomorrow
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(sh, sm, 0, 0);
-    const t = setTimeout(() => scheduleRandom(msgs, start, end, count), tomorrow - now);
-    timers.push(t);
-    }
+function descSched() {
+  if (!sched) return '';
+  if (sched.mode === 'fixed') return `Daily at ${sched.time}`;
+  if (sched.mode === 'random') return `${sched.count}x/day, ${sched.start}–${sched.end}`;
+  return `Every ${sched.interval}min, ${sched.start}–${sched.end}`;
+}
 
-    function scheduleInterval(msgs, intervalMin, start, end) {
-    const [sh, sm] = start.split(':').map(Number);
-    const [eh, em] = end.split(':').map(Number);
-    function tick() {
-    const now = new Date();
-    const h = now.getHours(), m = now.getMinutes();
-    const inWindow = (h > sh || (h === sh && m >= sm)) && (h < eh || (h===eh && m < em)); if (inWindow)
-      fireNotif(randPick(msgs)); const t=setTimeout(tick, intervalMin * 60000); timers.push(t); } const now=new Date();
-      const first=new Date(); first.setHours(sh, sm, 0, 0); const delay=first> now ? first - now : intervalMin * 60000;
-      const t = setTimeout(tick, delay);
-      timers.push(t);
-      }
+async function requestPerms() {
+  if (!('Notification' in window)) { alert('Notifications not supported.'); return; }
+  const p = await Notification.requestPermission();
+  if (p === 'granted') {
+    document.getElementById('perm-warn').style.display = 'none';
+    alert('Notifications enabled!');
+  } else {
+    document.getElementById('perm-warn').style.display = 'block';
+  }
+}
 
-      self.addEventListener('notificationclick', e => {
-      e.notification.close();
-      e.waitUntil(clients.openWindow('/'));
-      });
+function randPick() {
+  if (!msgs.length) return { cat: 'mindset', text: 'Test notification!' };
+  return msgs[Math.floor(Math.random() * msgs.length)];
+}
+
+function sendTest() {
+  if (Notification.permission !== 'granted') { alert('Enable notifications first.'); return; }
+  const m = randPick();
+  new Notification(m.cat === 'mindset' ? '💭 Mindset' : '✅ Task', { body: m.text, icon: '/icon-192.png' });
+}
+
+// Init
+renderMsgs();
+setMode(mode);
+updateStatus();
+if (Notification.permission === 'denied') document.getElementById('perm-warn').style.display = 'block';
+</script>
+</body>
+</html>
